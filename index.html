@@ -95,7 +95,7 @@ function defineTracks() {
     canvasW: 800, canvasH: 600,
     waypoints: ovalWps,
     width: 90,
-    carStart: { x: ovalWps[0].x, y: ovalWps[0].y, angle: Math.atan2(ovalWps[1].y - ovalWps[0].y, ovalWps[1].x - ovalWps[0].x) + Math.PI }
+    carStart: { x: ovalWps[0].x, y: ovalWps[0].y, angle: Math.atan2(ovalWps[1].y - ovalWps[0].y, ovalWps[1].x - ovalWps[0].x) }
   };
 
   // ----- 地图 2: 标准赛道 — 多弯环形 -----
@@ -115,7 +115,7 @@ function defineTracks() {
       {x:570,y:220}, {x:600,y:190}, {x:650,y:190}
     ],
     width: 70,
-    carStart: { x: 700, y: 200, angle: Math.atan2(220-200, 750-700) + Math.PI }
+    carStart: { x: 700, y: 200, angle: Math.atan2(220-200, 750-700) }
   };
 
   // ----- 地图 3: 进阶挑战 — S弯 + 发卡弯 -----
@@ -140,7 +140,7 @@ function defineTracks() {
       {x:630,y:240}, {x:640,y:170}, {x:630,y:120}
     ],
     width: 55,
-    carStart: { x: 650, y: 100, angle: Math.atan2(110-100, 720-650) + Math.PI }
+    carStart: { x: 650, y: 100, angle: Math.atan2(110-100, 720-650) }
   };
 }
 

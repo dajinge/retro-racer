@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>怀旧赛车</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a2e;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Courier New', monospace;
+    color: #ccc;
+  }
+  #toolbar {
+    padding: 10px 0;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  #toolbar button {
+    padding: 6px 14px;
+    font-family: inherit;
+    font-size: 14px;
+    background: #333;
+    color: #ccc;
+    border: 1px solid #555;
+    cursor: pointer;
+    border-radius: 3px;
+  }
+  #toolbar button.active {
+    background: #556;
+    border-color: #88a;
+    color: #fff;
+  }
+  #hint {
+    padding: 6px 0 10px;
+    font-size: 12px;
+    color: #666;
+  }
+  canvas {
+    border: 1px solid #333;
+    display: block;
+  }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <button id="btn-map1" class="active">地图1 · 新手村</button>
+  <button id="btn-map2">地图2 · 标准赛道</button>
+  <button id="btn-map3">地图3 · 进阶挑战</button>
+</div>
+
+<canvas id="game"></canvas>
+
+<div id="hint">WASD / 方向键 操控 &nbsp;|&nbsp; 按住方向键过弯自动漂移</div>
+
+<script>
+// ==================== 常量 ====================
+const ACCEL = 400;
+const REV_ACCEL = 300;
+const MAX_SPEED = 350;
+const MAX_REV_SPEED = 120;
+const FRICTION = 0.97;
+const TURN_RATE = 3.5;
+const DRIFT_FORCE = 80;
+const DRIFT_SPEED_LOSS = 0.995;
+const DRIFT_RECOVERY = 0.90;
+
+// ==================== 全局状态 ====================
+let canvas, ctx;
+let currentTrack = 0;
+let car = { x: 0, y: 0, angle: 0, speed: 0, driftOffset: 0 };
+let input = { forward: false, backward: false, left: false, right: false };
+let tracks = [];
+let grassDots = [];
+let lastTime = 0;
+
+// ==================== 赛道定义 ====================
+function defineTracks() {
+  // ----- 地图 1: 新手村 — 椭圆环形 -----
+  const cx1 = 400, cy1 = 300, rx1 = 260, ry1 = 190;
+  const ovalWps = [];
+  for (let i = 0; i < 24; i++) {
+    const a = (i / 24) * Math.PI * 2;
+    ovalWps.push({ x: cx1 + Math.cos(a) * rx1, y: cy1 + Math.sin(a) * ry1 });
+  }
+  tracks[0] = {
+    name: '地图1 · 新手村 — 椭圆环形',
+    canvasW: 800, canvasH: 600,
+    waypoints: ovalWps,
+    width: 90,
+    carStart: { x: ovalWps[0].x, y: ovalWps[0].y, angle: Math.atan2(ovalWps[1].y - ovalWps[0].y, ovalWps[1].x - ovalWps[0].x) }
+  };
+
+  // ----- 地图 2: 标准赛道 — 多弯环形 -----
+  tracks[1] = {
+    name: '地图2 · 标准赛道 — 多弯环形',
+    canvasW: 900, canvasH: 700,
+    waypoints: [
+      {x:700,y:200}, {x:750,y:220}, {x:770,y:280}, {x:760,y:340},
+      {x:740,y:390}, {x:700,y:430}, {x:640,y:460},
+      {x:570,y:470}, {x:500,y:460}, {x:440,y:430},
+      {x:390,y:390}, {x:360,y:350}, {x:340,y:310},
+      {x:310,y:260}, {x:270,y:220}, {x:220,y:200},
+      {x:170,y:190}, {x:140,y:210}, {x:130,y:260}, {x:150,y:320},
+      {x:180,y:370}, {x:220,y:410}, {x:270,y:430},
+      {x:330,y:440}, {x:390,y:440}, {x:440,y:420},
+      {x:500,y:390}, {x:540,y:340}, {x:550,y:280},
+      {x:570,y:220}, {x:600,y:190}, {x:650,y:190}
+    ],
+    width: 70,
+    carStart: { x: 700, y: 200, angle: Math.atan2(220-200, 750-700) }
+  };
+
+  // ----- 地图 3: 进阶挑战 — S弯 + 发卡弯 -----
+  tracks[2] = {
+    name: '地图3 · 进阶挑战 — S弯+发卡弯',
+    canvasW: 900, canvasH: 600,
+    waypoints: [
+      {x:650,y:100}, {x:720,y:110}, {x:770,y:150}, {x:790,y:210},
+      {x:780,y:270},
+      {x:750,y:310}, {x:700,y:330}, {x:640,y:320},
+      {x:580,y:290}, {x:530,y:250}, {x:500,y:200},
+      {x:490,y:150},
+      {x:450,y:120}, {x:390,y:110}, {x:330,y:120},
+      {x:280,y:150}, {x:250,y:200}, {x:250,y:260},
+      {x:270,y:320}, {x:310,y:370}, {x:350,y:400},
+      {x:420,y:410}, {x:480,y:390}, {x:520,y:350},
+      {x:540,y:300}, {x:540,y:240},
+      {x:520,y:190}, {x:470,y:160}, {x:420,y:150},
+      {x:370,y:160}, {x:340,y:190}, {x:330,y:240},
+      {x:350,y:290}, {x:390,y:330}, {x:430,y:350},
+      {x:500,y:360}, {x:560,y:340}, {x:600,y:300},
+      {x:630,y:240}, {x:640,y:170}, {x:630,y:120}
+    ],
+    width: 55,
+    carStart: { x: 650, y: 100, angle: Math.atan2(110-100, 720-650) }
+  };
+}
+
+function generateGrassDots() {
+  grassDots = [];
+  for (let ti = 0; ti < 3; ti++) {
+    const t = tracks[ti];
+    const dots = [];
+    for (let i = 0; i < 150; i++) {
+      dots.push({ x: Math.random() * t.canvasW, y: Math.random() * t.canvasH });
+    }
+    grassDots.push(dots);
+  }
+}
+
+function resetCar() {
+  const t = tracks[currentTrack];
+  car.x = t.carStart.x;
+  car.y = t.carStart.y;
+  car.angle = t.carStart.angle;
+  car.speed = 0;
+  car.driftOffset = 0;
+}
+
+// ==================== 输入处理 ====================
+function bindInput() {
+  const keyMap = {
+    'KeyW': 'forward',     'ArrowUp': 'forward',
+    'KeyS': 'backward',    'ArrowDown': 'backward',
+    'KeyA': 'left',        'ArrowLeft': 'left',
+    'KeyD': 'right',       'ArrowRight': 'right'
+  };
+
+  window.addEventListener('keydown', (e) => {
+    const action = keyMap[e.code];
+    if (action) {
+      e.preventDefault();
+      input[action] = true;
+    }
+  });
+
+  window.addEventListener('keyup', (e) => {
+    const action = keyMap[e.code];
+    if (action) {
+      e.preventDefault();
+      input[action] = false;
+    }
+  });
+
+  window.addEventListener('blur', () => {
+    input.forward = false;
+    input.backward = false;
+    input.left = false;
+    input.right = false;
+  });
+}
+
+// ==================== 物理引擎 ====================
+function updatePhysics(dt) {
+  const t = Math.min(dt, 0.05);
+
+  // 加减速
+  if (input.forward) {
+    car.speed += ACCEL * t;
+  } else if (input.backward) {
+    car.speed -= REV_ACCEL * t;
+  } else {
+    car.speed *= Math.pow(FRICTION, t * 60);
+    if (Math.abs(car.speed) < 1) car.speed = 0;
+  }
+  car.speed = Math.max(-MAX_REV_SPEED, Math.min(MAX_SPEED, car.speed));
+
+  // 转向 + 漂移
+  const speedRatio = Math.abs(car.speed) / MAX_SPEED;
+  const turning = input.left || input.right;
+
+  if (Math.abs(car.speed) > 1 && turning) {
+    const dir = input.left ? -1 : 1;
+    const turnAmount = TURN_RATE * speedRatio * t;
+    car.angle += turnAmount * dir;
+
+    const targetDrift = dir * DRIFT_FORCE * speedRatio;
+    car.driftOffset += (targetDrift - car.driftOffset) * 6 * t;
+    car.speed *= Math.pow(DRIFT_SPEED_LOSS, t * 60);
+  } else {
+    car.driftOffset *= Math.pow(DRIFT_RECOVERY, t * 60);
+    if (Math.abs(car.driftOffset) < 0.5) car.driftOffset = 0;
+  }
+
+  // 位移
+  const headingX = Math.cos(car.angle);
+  const headingY = Math.sin(car.angle);
+  const lateralX = Math.cos(car.angle + Math.PI / 2);
+  const lateralY = Math.sin(car.angle + Math.PI / 2);
+
+  car.x += headingX * car.speed * t;
+  car.y += headingY * car.speed * t;
+  car.x += lateralX * car.driftOffset * t;
+  car.y += lateralY * car.driftOffset * t;
+}
+
+// ==================== 边界碰撞 ====================
+function closestPointOnSegment(px, py, a, b) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return { x: a.x, y: a.y };
+  let t = ((px - a.x) * dx + (py - a.y) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  return { x: a.x + t * dx, y: a.y + t * dy };
+}
+
+function constrainToTrack() {
+  const t = tracks[currentTrack];
+  const wps = t.waypoints;
+  const halfW = t.width / 2;
+
+  let minDist = Infinity;
+  let nearX = car.x, nearY = car.y;
+
+  for (let i = 0; i < wps.length; i++) {
+    const j = (i + 1) % wps.length;
+    const cp = closestPointOnSegment(car.x, car.y, wps[i], wps[j]);
+    const dx = car.x - cp.x;
+    const dy = car.y - cp.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < minDist) {
+      minDist = dist;
+      nearX = cp.x;
+      nearY = cp.y;
+    }
+  }
+
+  if (minDist > halfW) {
+    const dx = car.x - nearX;
+    const dy = car.y - nearY;
+    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    car.x = nearX + (dx / dist) * halfW;
+    car.y = nearY + (dy / dist) * halfW;
+    car.speed *= 0.98;
+  }
+}
+
+// ==================== 渲染 ====================
+function drawGrass() {
+  const t = tracks[currentTrack];
+  ctx.fillStyle = '#3a5a3a';
+  ctx.fillRect(0, 0, t.canvasW, t.canvasH);
+
+  ctx.fillStyle = 'rgba(50,90,50,0.3)';
+  const dots = grassDots[currentTrack];
+  for (const d of dots) {
+    ctx.fillRect(d.x, d.y, 3, 3);
+  }
+}
+
+function drawTrack() {
+  const t = tracks[currentTrack];
+  const wps = t.waypoints;
+
+  function tracePath() {
+    ctx.beginPath();
+    ctx.moveTo(wps[0].x, wps[0].y);
+    for (let i = 1; i < wps.length; i++) {
+      ctx.lineTo(wps[i].x, wps[i].y);
+    }
+    ctx.closePath();
+  }
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  // 路肩（最底层）
+  tracePath();
+  ctx.strokeStyle = '#cccccc';
+  ctx.lineWidth = t.width + 8;
+  ctx.stroke();
+
+  // 红白路肩条纹
+  tracePath();
+  ctx.strokeStyle = '#e63946';
+  ctx.lineWidth = t.width + 4;
+  ctx.setLineDash([20, 20]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // 沥青路面
+  tracePath();
+  ctx.strokeStyle = '#4a4a4a';
+  ctx.lineWidth = t.width;
+  ctx.stroke();
+
+  // 中线虚线
+  tracePath();
+  ctx.strokeStyle = '#f0f0f0';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([14, 18]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+function drawCar() {
+  ctx.save();
+  ctx.translate(car.x, car.y);
+  ctx.rotate(car.angle);
+
+  // 阴影
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillRect(-12, -6, 28, 16);
+
+  // 车身
+  ctx.fillStyle = '#e63946';
+  ctx.fillRect(-14, -8, 28, 16);
+
+  // 车窗
+  ctx.fillStyle = '#1d3557';
+  ctx.fillRect(-6, -5, 10, 10);
+
+  // 车头三角
+  ctx.fillStyle = '#f1fa8c';
+  ctx.beginPath();
+  ctx.moveTo(14, 0);
+  ctx.lineTo(8, -5);
+  ctx.lineTo(8, 5);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.restore();
+}
+
+function render() {
+  drawGrass();
+  drawTrack();
+  drawCar();
+}
+
+// ==================== 游戏循环 ====================
+function gameLoop(timestamp) {
+  if (lastTime === 0) lastTime = timestamp;
+  const dt = (timestamp - lastTime) / 1000;
+  lastTime = timestamp;
+
+  updatePhysics(dt);
+  constrainToTrack();
+  render();
+
+  requestAnimationFrame(gameLoop);
+}
+
+// ==================== UI 绑定 ====================
+function bindUI() {
+  const buttons = [
+    document.getElementById('btn-map1'),
+    document.getElementById('btn-map2'),
+    document.getElementById('btn-map3')
+  ];
+
+  buttons.forEach((btn, i) => {
+    btn.addEventListener('click', () => {
+      currentTrack = i;
+      buttons.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      resizeCanvas();
+      resetCar();
+    });
+  });
+}
+
+function resizeCanvas() {
+  const t = tracks[currentTrack];
+  if (t) {
+    canvas.width = t.canvasW;
+    canvas.height = t.canvasH;
+  } else {
+    canvas.width = 800;
+    canvas.height = 600;
+  }
+}
+
+// ==================== 初始化 ====================
+function init() {
+  canvas = document.getElementById('game');
+  ctx = canvas.getContext('2d');
+  defineTracks();
+  generateGrassDots();
+  currentTrack = 0;
+  resizeCanvas();
+  resetCar();
+  bindInput();
+  bindUI();
+  window.addEventListener('resize', () => resizeCanvas());
+  lastTime = 0;
+  requestAnimationFrame(gameLoop);
+}
+
+window.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
